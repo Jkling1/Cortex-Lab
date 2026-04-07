@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
-import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig, ProjectTrackProgress, ReviewCard, DashboardStats, SkillTreeNode } from '../../curriculum/types'
+import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig, ProjectTrackProgress, ReviewCard, DashboardStats, SkillTreeNode, LessonDefinition, LabDefinition, LessonNote, LessonRecommendations } from '../../curriculum/types'
+import { projectTracks } from '../../curriculum/project-tracks'
 import { tiers } from '../../curriculum/tiers'
 
 let db: Database.Database
@@ -93,6 +94,22 @@ function migrate(): void {
     INSERT OR IGNORE INTO content_sources (source, topics) VALUES
       ('arxiv', '["machine learning", "deep learning", "neural networks", "computer vision", "natural language processing", "reinforcement learning"]'),
       ('huggingface', '["text-generation", "image-classification", "object-detection", "transformers"]');
+
+    CREATE TABLE IF NOT EXISTS dynamic_tier_content (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tier_id INTEGER NOT NULL UNIQUE,
+      lessons_json TEXT NOT NULL DEFAULT '[]',
+      labs_json TEXT NOT NULL DEFAULT '[]',
+      generated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS lesson_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson_def_id TEXT NOT NULL UNIQUE,
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
 
     CREATE TABLE IF NOT EXISTS review_cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -661,9 +678,25 @@ function rowToReviewCard(row: Record<string, unknown>): ReviewCard {
 
 // Dashboard functions
 
+// Helper: get effective lesson count for a tier (static + dynamic)
+export function getEffectiveLessonsForTier(tierId: number): LessonDefinition[] {
+  const tier = tiers.find(t => t.id === tierId)
+  if (tier && tier.lessons.length > 0) return tier.lessons
+  const dynamic = getDynamicTierContent(tierId)
+  return dynamic?.lessons || []
+}
+
+export function getEffectiveLabsForTier(tierId: number): LabDefinition[] {
+  const tier = tiers.find(t => t.id === tierId)
+  if (tier && tier.labs.length > 0) return tier.labs
+  const dynamic = getDynamicTierContent(tierId)
+  return dynamic?.labs || []
+}
+
 export function getDashboardStats(): DashboardStats {
   const state = getUserState()
   const tier = tiers.find(t => t.id === state.currentTierId)
+  const effectiveLessons = getEffectiveLessonsForTier(state.currentTierId)
 
   const totalLessons = db.prepare("SELECT COUNT(*) as c FROM lesson_progress WHERE status = 'completed'").get() as { c: number }
   const totalLabs = db.prepare("SELECT COUNT(*) as c FROM lab_progress WHERE status = 'completed'").get() as { c: number }
@@ -672,11 +705,12 @@ export function getDashboardStats(): DashboardStats {
 
   let totalHours = 0
   for (const t of tiers) {
+    const effLessons = getEffectiveLessonsForTier(t.id)
     const completed = db.prepare(
       "SELECT COUNT(*) as c FROM lesson_progress WHERE tier_id = ? AND status = 'completed'"
     ).get(t.id) as { c: number }
-    if (completed.c > 0) {
-      totalHours += (completed.c / Math.max(1, t.lessons.length)) * t.estimatedHours
+    if (completed.c > 0 && effLessons.length > 0) {
+      totalHours += (completed.c / effLessons.length) * t.estimatedHours
     }
   }
 
@@ -684,7 +718,7 @@ export function getDashboardStats(): DashboardStats {
     currentTierId: state.currentTierId,
     currentTierName: tier?.name || 'Unknown',
     currentLessonOrder: state.currentLessonOrder,
-    totalLessonsInTier: tier?.lessons.length || 0,
+    totalLessonsInTier: effectiveLessons.length,
     streakDays: state.streakDays,
     totalLessonsCompleted: totalLessons.c,
     totalLabsCompleted: totalLabs.c,
@@ -700,6 +734,9 @@ export function getSkillTree(): SkillTreeNode[] {
   const state = getUserState()
 
   return tiers.map(tier => {
+    const effLessons = getEffectiveLessonsForTier(tier.id)
+    const effLabs = getEffectiveLabsForTier(tier.id)
+
     const lessonsCompleted = db.prepare(
       "SELECT COUNT(*) as c FROM lesson_progress WHERE tier_id = ? AND status = 'completed'"
     ).get(tier.id) as { c: number }
@@ -709,7 +746,7 @@ export function getSkillTree(): SkillTreeNode[] {
     ).get(tier.id) as { c: number }
 
     let status: SkillTreeNode['status']
-    if (lessonsCompleted.c === tier.lessons.length && tier.lessons.length > 0) {
+    if (lessonsCompleted.c === effLessons.length && effLessons.length > 0) {
       status = 'completed'
     } else if (tier.id === state.currentTierId) {
       status = 'in_progress'
@@ -717,16 +754,16 @@ export function getSkillTree(): SkillTreeNode[] {
       status = 'completed'
     } else {
       const prereqsMet = tier.prerequisites.every(pid => pid < state.currentTierId || pid === state.currentTierId)
-      status = prereqsMet && tier.lessons.length > 0 ? 'available' : 'locked'
+      status = prereqsMet ? 'available' : 'locked'
     }
 
     return {
       id: tier.id,
       name: tier.name,
       description: tier.description,
-      lessonsTotal: tier.lessons.length,
+      lessonsTotal: effLessons.length,
       lessonsCompleted: lessonsCompleted.c,
-      labsTotal: tier.labs.length,
+      labsTotal: effLabs.length,
       labsCompleted: labsCompleted.c,
       prerequisites: tier.prerequisites,
       status
@@ -737,4 +774,90 @@ export function getSkillTree(): SkillTreeNode[] {
 export function hasReviewCardsForLesson(lessonDefId: string): boolean {
   const row = db.prepare('SELECT COUNT(*) as c FROM review_cards WHERE lesson_def_id = ?').get(lessonDefId) as { c: number }
   return row.c > 0
+}
+
+// Dynamic tier content functions
+
+export function getDynamicTierContent(tierId: number): { lessons: LessonDefinition[]; labs: LabDefinition[] } | null {
+  const row = db.prepare('SELECT * FROM dynamic_tier_content WHERE tier_id = ?').get(tierId) as Record<string, unknown> | undefined
+  if (!row) return null
+  return {
+    lessons: JSON.parse(row.lessons_json as string),
+    labs: JSON.parse(row.labs_json as string)
+  }
+}
+
+export function saveDynamicTierContent(tierId: number, lessons: LessonDefinition[], labs: LabDefinition[]): void {
+  db.prepare(`
+    INSERT INTO dynamic_tier_content (tier_id, lessons_json, labs_json)
+    VALUES (?, ?, ?)
+    ON CONFLICT(tier_id) DO UPDATE SET lessons_json = ?, labs_json = ?, generated_at = datetime('now')
+  `).run(tierId, JSON.stringify(lessons), JSON.stringify(labs), JSON.stringify(lessons), JSON.stringify(labs))
+}
+
+export function hasDynamicContent(tierId: number): boolean {
+  const row = db.prepare('SELECT COUNT(*) as c FROM dynamic_tier_content WHERE tier_id = ?').get(tierId) as { c: number }
+  return row.c > 0
+}
+
+// Lesson notes functions
+
+export function getNote(lessonDefId: string): LessonNote | null {
+  const row = db.prepare('SELECT * FROM lesson_notes WHERE lesson_def_id = ?').get(lessonDefId) as Record<string, unknown> | undefined
+  if (!row) return null
+  return {
+    id: row.id as number,
+    lessonDefId: row.lesson_def_id as string,
+    content: row.content as string,
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string
+  }
+}
+
+export function saveNote(lessonDefId: string, content: string): void {
+  db.prepare(`
+    INSERT INTO lesson_notes (lesson_def_id, content)
+    VALUES (?, ?)
+    ON CONFLICT(lesson_def_id) DO UPDATE SET content = ?, updated_at = datetime('now')
+  `).run(lessonDefId, content, content)
+}
+
+// Recommendations function
+
+export function getLessonRecommendations(lessonDefId: string, tierId: number): LessonRecommendations {
+  // Find related lab
+  const effLabs = getEffectiveLabsForTier(tierId)
+  const relatedLab = effLabs.find(l => l.relatedLessonIds.includes(lessonDefId))
+
+  // Find related project milestones
+  const relatedProjectMilestones: LessonRecommendations['relatedProjectMilestones'] = []
+  for (const track of projectTracks) {
+    const trackProgress = getTrackProgress(track.id)
+    if (!trackProgress?.activeTrack) continue
+    for (const m of track.milestones) {
+      if (m.relatedLessonIds.includes(lessonDefId) || m.relatedTierIds.includes(tierId)) {
+        relatedProjectMilestones.push({
+          trackId: track.id,
+          trackName: track.name,
+          milestoneTitle: m.title
+        })
+        break
+      }
+    }
+  }
+
+  // Review cards due
+  const reviewStats = getReviewStats()
+
+  // Next lesson
+  const state = getUserState()
+  const effLessons = getEffectiveLessonsForTier(state.currentTierId)
+  const nextLessonDef = effLessons.find(l => l.order === state.currentLessonOrder)
+
+  return {
+    relatedLab: relatedLab ? { id: relatedLab.id, title: relatedLab.title } : null,
+    relatedProjectMilestones,
+    reviewCardsDue: reviewStats.due,
+    nextLesson: nextLessonDef ? { id: nextLessonDef.id, title: nextLessonDef.title, tierId: state.currentTierId } : null
+  }
 }

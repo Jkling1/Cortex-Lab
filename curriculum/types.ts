@@ -219,3 +219,27 @@ export interface SkillTreeNode {
   prerequisites: number[]
   status: 'locked' | 'available' | 'in_progress' | 'completed'
 }
+
+// Phase 6: Dynamic Curriculum & Adaptive Intelligence
+
+export interface DynamicTierContent {
+  tierId: number
+  lessons: LessonDefinition[]
+  labs: LabDefinition[]
+  generatedAt: string
+}
+
+export interface LessonNote {
+  id?: number
+  lessonDefId: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LessonRecommendations {
+  relatedLab: { id: string; title: string } | null
+  relatedProjectMilestones: { trackId: string; trackName: string; milestoneTitle: string }[]
+  reviewCardsDue: number
+  nextLesson: { id: string; title: string; tierId: number } | null
+}

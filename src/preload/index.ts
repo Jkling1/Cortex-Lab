@@ -42,7 +42,15 @@ const api = {
   getSkillTree: () => ipcRenderer.invoke('get-skill-tree'),
   getDueReviewCards: (limit?: number) => ipcRenderer.invoke('get-due-review-cards', limit || 10),
   submitReview: (cardId: number, quality: number) => ipcRenderer.invoke('submit-review', cardId, quality),
-  generateReviewCards: (lessonDefId: string) => ipcRenderer.invoke('generate-review-cards', lessonDefId)
+  generateReviewCards: (lessonDefId: string) => ipcRenderer.invoke('generate-review-cards', lessonDefId),
+  // Phase 6: Dynamic curriculum & notes
+  generateTierCurriculum: (tierId: number) => ipcRenderer.invoke('generate-tier-curriculum', tierId),
+  saveLessonNote: (lessonDefId: string, content: string) =>
+    ipcRenderer.invoke('save-lesson-note', lessonDefId, content),
+  getLessonNote: (lessonDefId: string) => ipcRenderer.invoke('get-lesson-note', lessonDefId),
+  getLessonRecommendations: (lessonDefId: string, tierId: number) =>
+    ipcRenderer.invoke('get-lesson-recommendations', lessonDefId, tierId),
+  getWhatsNext: () => ipcRenderer.invoke('get-whats-next')
 }
 
 contextBridge.exposeInMainWorld('api', api)

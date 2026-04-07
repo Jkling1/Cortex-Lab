@@ -27,23 +27,42 @@ interface SkillNode {
   status: 'locked' | 'available' | 'in_progress' | 'completed'
 }
 
-interface Props {
-  onNavigateReview: () => void
+interface WhatsNextAction {
+  type: string
+  label: string
+  description: string
 }
 
-export default function Dashboard({ onNavigateReview }: Props) {
+interface Props {
+  onNavigateReview: () => void
+  onNavigate: (view: string) => void
+}
+
+export default function Dashboard({ onNavigateReview, onNavigate }: Props) {
   const [stats, setStats] = useState<Stats | null>(null)
   const [tree, setTree] = useState<SkillNode[]>([])
+  const [whatsNext, setWhatsNext] = useState<WhatsNextAction[]>([])
 
   useEffect(() => {
     Promise.all([
       window.api.getDashboardStats(),
-      window.api.getSkillTree()
-    ]).then(([s, t]) => {
+      window.api.getSkillTree(),
+      window.api.getWhatsNext()
+    ]).then(([s, t, wn]) => {
       setStats(s)
       setTree(t)
+      setWhatsNext(wn)
     })
   }, [])
+
+  function handleWhatsNextClick(action: WhatsNextAction) {
+    switch (action.type) {
+      case 'review': onNavigateReview(); break
+      case 'lesson': onNavigate('lesson'); break
+      case 'generate-tier': onNavigate('lesson'); break
+      case 'project': onNavigate('projects'); break
+    }
+  }
 
   if (!stats) return <div className="lesson-loading">Loading dashboard...</div>
 
@@ -53,6 +72,33 @@ export default function Dashboard({ onNavigateReview }: Props) {
         <h1>Dashboard</h1>
         <p>Your AI mastery journey at a glance.</p>
       </div>
+
+      {/* What's Next */}
+      {whatsNext.length > 0 && (
+        <div className="dashboard-section whats-next-section">
+          <h2>What's Next</h2>
+          <div className="whats-next-cards">
+            {whatsNext.map((action, i) => (
+              <button
+                key={i}
+                className={`whats-next-card whats-next-${action.type}`}
+                onClick={() => handleWhatsNextClick(action)}
+              >
+                <div className="whats-next-icon">
+                  {action.type === 'review' && '\u{1F4DD}'}
+                  {action.type === 'lesson' && '\u{1F4D6}'}
+                  {action.type === 'generate-tier' && '\u{1F680}'}
+                  {action.type === 'project' && '\u{1F3AF}'}
+                </div>
+                <div className="whats-next-text">
+                  <h4>{action.label}</h4>
+                  <p>{action.description}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="stats-grid">
@@ -92,7 +138,11 @@ export default function Dashboard({ onNavigateReview }: Props) {
           </div>
           <div className="position-lesson">
             <span className="position-label">Lesson</span>
-            <span className="position-value">{stats.currentLessonOrder} of {stats.totalLessonsInTier}</span>
+            <span className="position-value">
+              {stats.totalLessonsInTier > 0
+                ? `${stats.currentLessonOrder} of ${stats.totalLessonsInTier}`
+                : 'Curriculum not yet generated'}
+            </span>
           </div>
           {stats.reviewCardsDue > 0 && (
             <button className="review-due-btn" onClick={onNavigateReview}>
@@ -134,6 +184,11 @@ export default function Dashboard({ onNavigateReview }: Props) {
                       {node.lessonsCompleted}/{node.lessonsTotal} lessons
                       {node.labsTotal > 0 && ` \u00B7 ${node.labsCompleted}/${node.labsTotal} labs`}
                     </span>
+                  </div>
+                )}
+                {node.lessonsTotal === 0 && node.status !== 'locked' && (
+                  <div className="skill-node-progress">
+                    <span className="skill-node-counts">Curriculum generates when you arrive</span>
                   </div>
                 )}
                 {node.prerequisites.length > 0 && (

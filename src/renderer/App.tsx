@@ -84,10 +84,10 @@ export default function App() {
       />
       <main className="main-content">
         {view === 'dashboard' && (
-          <Dashboard onNavigateReview={() => setView('review')} />
+          <Dashboard onNavigateReview={() => setView('review')} onNavigate={(v) => setView(v as View)} />
         )}
         {view === 'lesson' && (
-          <DailyLesson onComplete={handleLessonComplete} />
+          <DailyLesson onComplete={handleLessonComplete} onNavigate={(v) => setView(v as View)} />
         )}
         {view === 'labs' && !activeLabId && (
           <LabList

@@ -85,6 +85,57 @@ function formatContentContext(articles: ContentArticle[]): string {
   ).join('\n')
 }
 
+export async function generateReviewCardsFromContent(
+  lessonContent: string,
+  concepts: string[],
+  lessonTitle: string,
+  apiKey: string
+): Promise<{ concept: string; question: string; answer: string }[]> {
+  const client = new Anthropic({ apiKey })
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2048,
+    messages: [{
+      role: 'user',
+      content: `Based on this lesson content, generate 4-6 spaced repetition review cards as a JSON array.
+
+**Lesson:** ${lessonTitle}
+**Key concepts:** ${concepts.join(', ')}
+
+**Lesson content (excerpt):**
+${lessonContent.slice(0, 3000)}
+
+Each card should be a JSON object with:
+- "concept": the specific concept being tested
+- "question": a specific, testable question (not generic "explain X" — ask about specific details, comparisons, applications, or calculations from the lesson)
+- "answer": a concise but complete answer (2-4 sentences)
+
+Vary the question types: some definitional, some comparative, some applied ("when would you use X over Y?"), some computational ("what would the output be if...").
+
+Respond with ONLY a JSON array, no markdown fences.`
+    }]
+  })
+
+  const text = response.content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+
+  try {
+    const jsonStr = text.replace(/^```json?\s*/m, '').replace(/\s*```\s*$/m, '').trim()
+    const cards = JSON.parse(jsonStr)
+    return Array.isArray(cards) ? cards : []
+  } catch {
+    // Fallback to template cards if parsing fails
+    return concepts.map(c => ({
+      concept: c,
+      question: `Explain "${c}" and why it matters in the context of ${lessonTitle}.`,
+      answer: `Key concept from "${lessonTitle}": ${c}`
+    }))
+  }
+}
+
 function extractSection(content: string, heading: string): string[] {
   const regex = new RegExp(`##?\\s*${heading}[\\s\\S]*?(?=##|$)`, 'i')
   const match = content.match(regex)

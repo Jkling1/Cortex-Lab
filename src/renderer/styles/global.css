@@ -1999,6 +1999,216 @@ body {
   line-height: 1.5;
 }
 
+/* Phase 6: Tier generation prompt */
+.tier-generation-prompt {
+  text-align: center;
+  padding: 4rem 2rem;
+  max-width: 550px;
+  margin: 2rem auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tier-gen-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.tier-generation-prompt h2 {
+  margin-bottom: 0.75rem;
+  color: var(--accent);
+}
+
+.tier-gen-description {
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.tier-gen-info {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 1.5rem;
+}
+
+.btn-lg {
+  padding: 0.85rem 2rem;
+  font-size: 1.05rem;
+}
+
+/* Recommendations panel */
+.recs-panel {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 2rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.recs-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.recs-icon {
+  font-size: 2.5rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.recs-header h2 {
+  color: var(--success);
+  margin-bottom: 0.3rem;
+}
+
+.recs-header p {
+  color: var(--text-secondary);
+}
+
+.recs-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rec-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: inherit;
+  width: 100%;
+  transition: all 0.15s;
+}
+
+.rec-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.rec-card-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.rec-card h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.1rem;
+}
+
+.rec-card p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Lesson notes */
+.lesson-notes-section {
+  margin-top: 1.5rem;
+}
+
+.notes-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 0.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.notes-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.notes-indicator {
+  color: var(--accent);
+  font-size: 1.2rem;
+  margin-left: 0.25rem;
+}
+
+.notes-editor {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: vertical;
+  margin-top: 0.5rem;
+  outline: none;
+}
+
+.notes-editor:focus {
+  border-color: var(--accent);
+}
+
+/* What's Next dashboard section */
+.whats-next-section {
+  margin-bottom: 2rem;
+}
+
+.whats-next-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.whats-next-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: inherit;
+  width: 100%;
+  transition: all 0.15s;
+}
+
+.whats-next-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.whats-next-card:first-child {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.whats-next-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.whats-next-text h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.1rem;
+}
+
+.whats-next-text p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

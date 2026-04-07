@@ -26,9 +26,17 @@ import {
   reviewCard,
   getDashboardStats,
   getSkillTree,
-  hasReviewCardsForLesson
+  hasReviewCardsForLesson,
+  getDynamicTierContent,
+  saveDynamicTierContent,
+  hasDynamicContent,
+  getNote,
+  saveNote,
+  getLessonRecommendations,
+  getEffectiveLessonsForTier
 } from './database'
-import { generateLesson } from './lesson-generator'
+import { generateLesson, generateReviewCardsFromContent } from './lesson-generator'
+import { generateTierCurriculum } from './curriculum-generator'
 import { runPythonLab } from './lab-runner'
 import { runContentPull } from './content-pulls/scheduler'
 import { tiers } from '../../curriculum/tiers'
@@ -36,9 +44,18 @@ import { projectTracks } from '../../curriculum/project-tracks'
 import { LessonDefinition, LabDefinition, ContentFeedFilters } from '../../curriculum/types'
 
 function findLessonDef(lessonDefId: string): LessonDefinition | undefined {
+  // Check static tiers first
   for (const tier of tiers) {
     const lesson = tier.lessons.find(l => l.id === lessonDefId)
     if (lesson) return lesson
+  }
+  // Check dynamic content
+  for (const tier of tiers) {
+    const dynamic = getDynamicTierContent(tier.id)
+    if (dynamic) {
+      const lesson = dynamic.lessons.find(l => l.id === lessonDefId)
+      if (lesson) return lesson
+    }
   }
   return undefined
 }
@@ -47,6 +64,14 @@ function findLabDef(labId: string): LabDefinition | undefined {
   for (const tier of tiers) {
     const lab = tier.labs.find(l => l.id === labId)
     if (lab) return lab
+  }
+  // Check dynamic content
+  for (const tier of tiers) {
+    const dynamic = getDynamicTierContent(tier.id)
+    if (dynamic) {
+      const lab = dynamic.labs.find(l => l.id === labId)
+      if (lab) return lab
+    }
   }
   return undefined
 }
@@ -57,14 +82,18 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('get-curriculum', () => {
-    return tiers.map(t => ({
-      id: t.id,
-      name: t.name,
-      description: t.description,
-      estimatedHours: t.estimatedHours,
-      lessonCount: t.lessons.length,
-      prerequisites: t.prerequisites
-    }))
+    return tiers.map(t => {
+      const effLessons = getEffectiveLessonsForTier(t.id)
+      return {
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        estimatedHours: t.estimatedHours,
+        lessonCount: effLessons.length,
+        prerequisites: t.prerequisites,
+        hasDynamic: hasDynamicContent(t.id)
+      }
+    })
   })
 
   ipcMain.handle('get-current-lesson', () => {
@@ -72,14 +101,29 @@ export function registerIpcHandlers(): void {
     const tier = tiers.find(t => t.id === state.currentTierId)
     if (!tier) return null
 
-    const lessonDef = tier.lessons.find(l => l.order === state.currentLessonOrder)
+    // Check static lessons first, then dynamic
+    const effLessons = getEffectiveLessonsForTier(state.currentTierId)
+
+    if (effLessons.length === 0) {
+      // No lessons for this tier — need to generate curriculum
+      return {
+        needsGeneration: true,
+        tierId: state.currentTierId,
+        tierName: tier.name,
+        tierDescription: tier.description
+      }
+    }
+
+    const lessonDef = effLessons.find(l => l.order === state.currentLessonOrder)
     if (!lessonDef) return null
 
     const cached = getLatestGeneratedLesson(lessonDef.id)
+    const note = getNote(lessonDef.id)
     return {
       definition: lessonDef,
       generated: cached,
-      tierName: tier.name
+      tierName: tier.name,
+      note: note?.content || ''
     }
   })
 
@@ -99,7 +143,7 @@ export function registerIpcHandlers(): void {
     return generated
   })
 
-  ipcMain.handle('mark-complete', (_event, lessonDefId: string) => {
+  ipcMain.handle('mark-complete', async (_event, lessonDefId: string) => {
     const lessonDef = findLessonDef(lessonDefId)
     if (!lessonDef) {
       throw new Error(`Lesson definition not found: ${lessonDefId}`)
@@ -107,20 +151,39 @@ export function registerIpcHandlers(): void {
 
     markLessonComplete(lessonDefId, lessonDef.tierId)
 
-    // Auto-generate spaced repetition cards for completed lesson
+    // Generate AI-powered review cards from lesson content
     if (!hasReviewCardsForLesson(lessonDefId)) {
-      const cards: { concept: string; question: string; answer: string }[] = []
-      for (const concept of lessonDef.concepts) {
-        cards.push({
-          concept,
-          question: `Explain "${concept}" and why it matters in ML.`,
-          answer: `From "${lessonDef.title}": ${concept}`
-        })
+      const state = getUserState()
+      const cached = getLatestGeneratedLesson(lessonDefId)
+      if (cached && state.apiKey) {
+        try {
+          const cards = await generateReviewCardsFromContent(
+            cached.content, lessonDef.concepts, lessonDef.title, state.apiKey
+          )
+          if (cards.length > 0) addReviewCards(lessonDefId, cards)
+        } catch {
+          // Fallback to template cards
+          const cards = lessonDef.concepts.map(c => ({
+            concept: c,
+            question: `Explain "${c}" and why it matters in ML.`,
+            answer: `From "${lessonDef.title}": ${c}`
+          }))
+          addReviewCards(lessonDefId, cards)
+        }
+      } else {
+        const cards = lessonDef.concepts.map(c => ({
+          concept: c,
+          question: `Explain "${c}" and why it matters in ML.`,
+          answer: `From "${lessonDef.title}": ${c}`
+        }))
+        addReviewCards(lessonDefId, cards)
       }
-      if (cards.length > 0) addReviewCards(lessonDefId, cards)
     }
 
-    return getUserState()
+    // Return state + recommendations
+    const newState = getUserState()
+    const recommendations = getLessonRecommendations(lessonDefId, lessonDef.tierId)
+    return { state: newState, recommendations }
   })
 
   ipcMain.handle('get-tier-progress', (_event, tierId: number) => {
@@ -137,7 +200,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('get-labs-for-tier', (_event, tierId: number) => {
     const tier = tiers.find(t => t.id === tierId)
     if (!tier) return []
-    return tier.labs.map(lab => {
+    // Use static labs if available, otherwise dynamic
+    let labsList = tier.labs
+    if (labsList.length === 0) {
+      const dynamic = getDynamicTierContent(tierId)
+      if (dynamic) labsList = dynamic.labs
+    }
+    return labsList.map(lab => {
       const progress = getLabProgress(lab.id)
       return {
         id: lab.id,
@@ -415,5 +484,82 @@ export function registerIpcHandlers(): void {
 
     addReviewCards(lessonDefId, cards)
     return { generated: cards.length }
+  })
+
+  // Phase 6: Dynamic curriculum & notes handlers
+
+  ipcMain.handle('generate-tier-curriculum', async (_event, tierId: number) => {
+    const state = getUserState()
+    if (!state.apiKey) {
+      throw new Error('No API key configured.')
+    }
+
+    const { lessons, labs } = await generateTierCurriculum(tierId, state.apiKey)
+    saveDynamicTierContent(tierId, lessons, labs)
+    return { lessons: lessons.length, labs: labs.length }
+  })
+
+  ipcMain.handle('save-lesson-note', (_event, lessonDefId: string, content: string) => {
+    saveNote(lessonDefId, content)
+    return { success: true }
+  })
+
+  ipcMain.handle('get-lesson-note', (_event, lessonDefId: string) => {
+    return getNote(lessonDefId)
+  })
+
+  ipcMain.handle('get-lesson-recommendations', (_event, lessonDefId: string, tierId: number) => {
+    return getLessonRecommendations(lessonDefId, tierId)
+  })
+
+  ipcMain.handle('get-whats-next', () => {
+    const state = getUserState()
+    const reviewStats = getDueReviewCards(1)
+    const effLessons = getEffectiveLessonsForTier(state.currentTierId)
+    const tier = tiers.find(t => t.id === state.currentTierId)
+
+    const actions: { type: string; label: string; description: string }[] = []
+
+    if (reviewStats.length > 0) {
+      const dueCount = getDueReviewCards(100).length
+      actions.push({
+        type: 'review',
+        label: `Review ${dueCount} concept${dueCount !== 1 ? 's' : ''}`,
+        description: 'Strengthen your retention before learning new material.'
+      })
+    }
+
+    if (effLessons.length === 0 && tier) {
+      actions.push({
+        type: 'generate-tier',
+        label: `Generate Tier ${state.currentTierId} Curriculum`,
+        description: `Unlock ${tier.name}: ${tier.description}`
+      })
+    } else if (effLessons.length > 0) {
+      const nextLesson = effLessons.find(l => l.order === state.currentLessonOrder)
+      if (nextLesson) {
+        actions.push({
+          type: 'lesson',
+          label: `Continue: ${nextLesson.title}`,
+          description: `Tier ${state.currentTierId}: ${tier?.name || ''} \u2022 Lesson ${nextLesson.order}`
+        })
+      }
+    }
+
+    // Check for active project tracks
+    const allProgress = getAllTrackProgress()
+    const activeTracks = allProgress.filter(p => p.activeTrack)
+    if (activeTracks.length > 0) {
+      const track = projectTracks.find(t => t.id === activeTracks[0].trackId)
+      if (track) {
+        actions.push({
+          type: 'project',
+          label: `${track.name}: Next Milestone`,
+          description: track.tagline
+        })
+      }
+    }
+
+    return actions
   })
 }
