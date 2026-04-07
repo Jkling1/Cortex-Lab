@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
-import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission } from '../../curriculum/types'
+import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig } from '../../curriculum/types'
 import { tiers } from '../../curriculum/tiers'
 
 let db: Database.Database
@@ -65,7 +65,60 @@ function migrate(): void {
       submitted_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS content_articles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      authors TEXT DEFAULT '[]',
+      url TEXT NOT NULL,
+      tags TEXT DEFAULT '[]',
+      published_at TEXT,
+      fetched_at TEXT DEFAULT (datetime('now')),
+      relevance_score REAL DEFAULT 0,
+      bookmarked INTEGER DEFAULT 0,
+      dismissed INTEGER DEFAULT 0,
+      UNIQUE(source, external_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS content_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL UNIQUE,
+      enabled INTEGER DEFAULT 1,
+      topics TEXT DEFAULT '[]',
+      last_fetched_at TEXT
+    );
+
+    INSERT OR IGNORE INTO content_sources (source, topics) VALUES
+      ('arxiv', '["machine learning", "deep learning", "neural networks", "computer vision", "natural language processing", "reinforcement learning"]'),
+      ('huggingface', '["text-generation", "image-classification", "object-detection", "transformers"]');
+
     INSERT OR IGNORE INTO user_state (id) VALUES (1);
+  `)
+
+  // FTS5 virtual table for full-text search over content
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
+      title, summary, tags, authors,
+      content='content_articles',
+      content_rowid='id'
+    );
+  `)
+
+  // Triggers to keep FTS in sync
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS content_ai AFTER INSERT ON content_articles BEGIN
+      INSERT INTO content_fts(rowid, title, summary, tags, authors)
+      VALUES (new.id, new.title, new.summary, new.tags, new.authors);
+    END;
+  `)
+
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS content_ad AFTER DELETE ON content_articles BEGIN
+      INSERT INTO content_fts(content_fts, rowid, title, summary, tags, authors)
+      VALUES ('delete', old.id, old.title, old.summary, old.tags, old.authors);
+    END;
   `)
 }
 
@@ -261,5 +314,146 @@ export function getLatestSubmissionForExercise(labId: string, exerciseIndex: num
     output: row.output as string,
     errors: row.errors as string,
     submittedAt: row.submitted_at as string
+  }
+}
+
+// Content pull functions
+
+function rowToArticle(row: Record<string, unknown>): ContentArticle {
+  return {
+    id: row.id as number,
+    source: row.source as ContentArticle['source'],
+    externalId: row.external_id as string,
+    title: row.title as string,
+    summary: row.summary as string,
+    authors: JSON.parse((row.authors as string) || '[]'),
+    url: row.url as string,
+    tags: JSON.parse((row.tags as string) || '[]'),
+    publishedAt: row.published_at as string,
+    fetchedAt: row.fetched_at as string,
+    relevanceScore: row.relevance_score as number,
+    bookmarked: (row.bookmarked as number) === 1,
+    dismissed: (row.dismissed as number) === 1
+  }
+}
+
+export function upsertArticle(article: Omit<ContentArticle, 'id' | 'bookmarked' | 'dismissed'>): number {
+  const result = db.prepare(`
+    INSERT INTO content_articles (source, external_id, title, summary, authors, url, tags, published_at, relevance_score)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source, external_id) DO UPDATE SET
+      title = excluded.title, summary = excluded.summary, authors = excluded.authors,
+      tags = excluded.tags, relevance_score = excluded.relevance_score
+  `).run(
+    article.source,
+    article.externalId,
+    article.title,
+    article.summary,
+    JSON.stringify(article.authors),
+    article.url,
+    JSON.stringify(article.tags),
+    article.publishedAt,
+    article.relevanceScore
+  )
+  return result.lastInsertRowid as number
+}
+
+export function getContentFeed(filters: ContentFeedFilters): ContentArticle[] {
+  const limit = filters.limit || 50
+  const offset = filters.offset || 0
+  let query: string
+  let params: unknown[]
+
+  if (filters.searchQuery) {
+    query = `
+      SELECT a.* FROM content_articles a
+      JOIN content_fts f ON a.id = f.rowid
+      WHERE f.content_fts MATCH ?
+        AND a.dismissed = 0
+        ${filters.source ? 'AND a.source = ?' : ''}
+        ${filters.bookmarkedOnly ? 'AND a.bookmarked = 1' : ''}
+      ORDER BY rank, a.relevance_score DESC, a.published_at DESC
+      LIMIT ? OFFSET ?
+    `
+    params = [filters.searchQuery]
+    if (filters.source) params.push(filters.source)
+    params.push(limit, offset)
+  } else {
+    query = `
+      SELECT * FROM content_articles
+      WHERE dismissed = 0
+        ${filters.source ? 'AND source = ?' : ''}
+        ${filters.bookmarkedOnly ? 'AND bookmarked = 1' : ''}
+      ORDER BY relevance_score DESC, published_at DESC
+      LIMIT ? OFFSET ?
+    `
+    params = []
+    if (filters.source) params.push(filters.source)
+    params.push(limit, offset)
+  }
+
+  const rows = db.prepare(query).all(...params) as Record<string, unknown>[]
+  return rows.map(rowToArticle)
+}
+
+export function toggleBookmark(articleId: number): boolean {
+  const row = db.prepare('SELECT bookmarked FROM content_articles WHERE id = ?').get(articleId) as { bookmarked: number } | undefined
+  if (!row) return false
+  const newVal = row.bookmarked === 1 ? 0 : 1
+  db.prepare('UPDATE content_articles SET bookmarked = ? WHERE id = ?').run(newVal, articleId)
+  return newVal === 1
+}
+
+export function dismissArticle(articleId: number): void {
+  db.prepare('UPDATE content_articles SET dismissed = 1 WHERE id = ?').run(articleId)
+}
+
+export function getContentStats(): ContentStats {
+  const total = db.prepare('SELECT COUNT(*) as c FROM content_articles WHERE dismissed = 0').get() as { c: number }
+  const arxiv = db.prepare("SELECT COUNT(*) as c FROM content_articles WHERE source = 'arxiv' AND dismissed = 0").get() as { c: number }
+  const hf = db.prepare("SELECT COUNT(*) as c FROM content_articles WHERE source = 'huggingface' AND dismissed = 0").get() as { c: number }
+  const bookmarked = db.prepare('SELECT COUNT(*) as c FROM content_articles WHERE bookmarked = 1 AND dismissed = 0').get() as { c: number }
+  const lastFetch = db.prepare('SELECT MAX(last_fetched_at) as t FROM content_sources').get() as { t: string | null }
+
+  return {
+    totalArticles: total.c,
+    arxivCount: arxiv.c,
+    huggingfaceCount: hf.c,
+    bookmarkedCount: bookmarked.c,
+    lastFetchedAt: lastFetch.t
+  }
+}
+
+export function getContentSources(): ContentSourceConfig[] {
+  const rows = db.prepare('SELECT * FROM content_sources').all() as Record<string, unknown>[]
+  return rows.map(row => ({
+    source: row.source as ContentSourceConfig['source'],
+    enabled: (row.enabled as number) === 1,
+    topics: JSON.parse((row.topics as string) || '[]')
+  }))
+}
+
+export function updateContentSource(source: string, enabled: boolean, topics: string[]): void {
+  db.prepare('UPDATE content_sources SET enabled = ?, topics = ? WHERE source = ?')
+    .run(enabled ? 1 : 0, JSON.stringify(topics), source)
+}
+
+export function markSourceFetched(source: string): void {
+  db.prepare('UPDATE content_sources SET last_fetched_at = datetime("now") WHERE source = ?').run(source)
+}
+
+export function searchContentForLesson(concepts: string[], limit: number = 5): ContentArticle[] {
+  const searchTerms = concepts.map(c => `"${c.replace(/"/g, '""')}"`).join(' OR ')
+  try {
+    const rows = db.prepare(`
+      SELECT a.* FROM content_articles a
+      JOIN content_fts f ON a.id = f.rowid
+      WHERE f.content_fts MATCH ? AND a.dismissed = 0
+      ORDER BY rank
+      LIMIT ?
+    `).all(searchTerms, limit) as Record<string, unknown>[]
+    return rows.map(rowToArticle)
+  } catch {
+    return []
   }
 }

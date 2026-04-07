@@ -9,12 +9,19 @@ import {
   getLabProgress,
   updateLabProgress,
   saveLabSubmission,
-  getLatestSubmissionForExercise
+  getLatestSubmissionForExercise,
+  getContentFeed,
+  toggleBookmark,
+  dismissArticle,
+  getContentStats,
+  getContentSources,
+  updateContentSource
 } from './database'
 import { generateLesson } from './lesson-generator'
 import { runPythonLab } from './lab-runner'
+import { runContentPull } from './content-pulls/scheduler'
 import { tiers } from '../../curriculum/tiers'
-import { LessonDefinition, LabDefinition } from '../../curriculum/types'
+import { LessonDefinition, LabDefinition, ContentFeedFilters } from '../../curriculum/types'
 
 function findLessonDef(lessonDefId: string): LessonDefinition | undefined {
   for (const tier of tiers) {
@@ -214,5 +221,37 @@ export function registerIpcHandlers(): void {
     if (!exercise) throw new Error(`Exercise not found: ${exerciseIndex}`)
 
     return exercise.solution
+  })
+
+  // Content pull handlers
+
+  ipcMain.handle('get-content-feed', (_event, filters: ContentFeedFilters) => {
+    return getContentFeed(filters)
+  })
+
+  ipcMain.handle('toggle-bookmark', (_event, articleId: number) => {
+    return toggleBookmark(articleId)
+  })
+
+  ipcMain.handle('dismiss-article', (_event, articleId: number) => {
+    dismissArticle(articleId)
+    return { success: true }
+  })
+
+  ipcMain.handle('get-content-stats', () => {
+    return getContentStats()
+  })
+
+  ipcMain.handle('get-content-sources', () => {
+    return getContentSources()
+  })
+
+  ipcMain.handle('update-content-source', (_event, source: string, enabled: boolean, topics: string[]) => {
+    updateContentSource(source, enabled, topics)
+    return { success: true }
+  })
+
+  ipcMain.handle('refresh-content', async () => {
+    return await runContentPull()
   })
 }

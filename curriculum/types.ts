@@ -95,3 +95,45 @@ export interface LabProgress {
   totalExercises: number
   completedAt: string | null
 }
+
+// Phase 3: Content Pulls
+
+export type ContentSource = 'arxiv' | 'huggingface'
+
+export interface ContentArticle {
+  id?: number
+  source: ContentSource
+  externalId: string
+  title: string
+  summary: string
+  authors: string[]
+  url: string
+  tags: string[]
+  publishedAt: string
+  fetchedAt: string
+  relevanceScore: number
+  bookmarked: boolean
+  dismissed: boolean
+}
+
+export interface ContentFeedFilters {
+  source?: ContentSource
+  bookmarkedOnly?: boolean
+  searchQuery?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ContentSourceConfig {
+  source: ContentSource
+  enabled: boolean
+  topics: string[]
+}
+
+export interface ContentStats {
+  totalArticles: number
+  arxivCount: number
+  huggingfaceCount: number
+  bookmarkedCount: number
+  lastFetchedAt: string | null
+}

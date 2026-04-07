@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { LessonDefinition, GeneratedLesson, UserState } from '../../curriculum/types'
+import { LessonDefinition, GeneratedLesson, UserState, ContentArticle } from '../../curriculum/types'
 import { tiers } from '../../curriculum/tiers'
+import { searchContentForLesson } from './database'
 
 export async function generateLesson(
   lessonDef: LessonDefinition,
@@ -12,6 +13,10 @@ export async function generateLesson(
   const tier = tiers.find(t => t.id === lessonDef.tierId)
   const completedCount = userState.currentLessonOrder - 1
 
+  // Pull relevant content from the indexed knowledge base
+  const relatedContent = searchContentForLesson(lessonDef.concepts)
+  const contentContext = formatContentContext(relatedContent)
+
   const systemPrompt = `You are Cortex, a brilliant and patient AI professor teaching a motivated student who wants to genuinely understand AI and machine learning — not just use tools, but understand what's happening underneath.
 
 Your teaching style:
@@ -21,6 +26,7 @@ Your teaching style:
 - Include code snippets (Python) when they help illustrate a concept
 - Be thorough but never boring — every paragraph should earn its place
 - Connect each concept to the bigger picture of the AI field
+${contentContext ? '\n- When relevant, reference recent papers, models, or tools from the AI world to keep lessons current' : ''}
 
 The student is currently in Tier ${lessonDef.tierId}: "${tier?.name}" and has completed ${completedCount} of ${tier?.lessons.length} lessons in this tier.`
 
@@ -35,6 +41,7 @@ The student is currently in Tier ${lessonDef.tierId}: "${tier?.name}" and has co
 ${lessonDef.objectives.map((o, i) => `${i + 1}. ${o}`).join('\n')}
 
 **Estimated reading time:** ${lessonDef.estimatedMinutes} minutes
+${contentContext ? `\n**Recent relevant content from the AI world (use where naturally applicable):**\n${contentContext}` : ''}
 
 Format your response as follows:
 
@@ -69,6 +76,13 @@ Use markdown formatting throughout. Make it feel like a great textbook chapter, 
     reviewQuestions: questions,
     generatedAt: new Date().toISOString()
   }
+}
+
+function formatContentContext(articles: ContentArticle[]): string {
+  if (articles.length === 0) return ''
+  return articles.map((a, i) =>
+    `${i + 1}. **${a.title}** (${a.source}, ${a.publishedAt?.split('T')[0] || 'recent'})\n   ${a.summary.slice(0, 200)}...\n   ${a.url}`
+  ).join('\n')
 }
 
 function extractSection(content: string, heading: string): string[] {

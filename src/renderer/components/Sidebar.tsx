@@ -10,7 +10,7 @@ interface SidebarProps {
   curriculum: TierInfo[]
   currentTierId: number
   streakDays: number
-  onNavigate: (view: 'lesson' | 'labs' | 'settings') => void
+  onNavigate: (view: 'lesson' | 'labs' | 'feed' | 'settings') => void
   activeView: string
 }
 
@@ -51,6 +51,12 @@ export default function Sidebar({ curriculum, currentTierId, streakDays, onNavig
           onClick={() => onNavigate('labs')}
         >
           Hands-On Labs
+        </button>
+        <button
+          className={`nav-item ${activeView === 'feed' ? 'active' : ''}`}
+          onClick={() => onNavigate('feed')}
+        >
+          AI World Feed
         </button>
         <button
           className={`nav-item ${activeView === 'settings' ? 'active' : ''}`}

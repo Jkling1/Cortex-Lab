@@ -16,7 +16,20 @@ const api = {
   getExerciseHint: (labId: string, exerciseIndex: number, hintIndex: number) =>
     ipcRenderer.invoke('get-exercise-hint', labId, exerciseIndex, hintIndex),
   getExerciseSolution: (labId: string, exerciseIndex: number) =>
-    ipcRenderer.invoke('get-exercise-solution', labId, exerciseIndex)
+    ipcRenderer.invoke('get-exercise-solution', labId, exerciseIndex),
+  // Content pull APIs
+  getContentFeed: (filters: Record<string, unknown>) => ipcRenderer.invoke('get-content-feed', filters),
+  toggleBookmark: (articleId: number) => ipcRenderer.invoke('toggle-bookmark', articleId),
+  dismissArticle: (articleId: number) => ipcRenderer.invoke('dismiss-article', articleId),
+  getContentStats: () => ipcRenderer.invoke('get-content-stats'),
+  getContentSources: () => ipcRenderer.invoke('get-content-sources'),
+  updateContentSource: (source: string, enabled: boolean, topics: string[]) =>
+    ipcRenderer.invoke('update-content-source', source, enabled, topics),
+  refreshContent: () => ipcRenderer.invoke('refresh-content'),
+  onContentUpdated: (callback: (result: unknown) => void) => {
+    ipcRenderer.on('content-updated', (_event, result) => callback(result))
+    return () => { ipcRenderer.removeAllListeners('content-updated') }
+  }
 }
 
 contextBridge.exposeInMainWorld('api', api)

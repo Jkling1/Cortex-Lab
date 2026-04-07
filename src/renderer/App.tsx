@@ -3,9 +3,10 @@ import Sidebar from './components/Sidebar'
 import DailyLesson from './components/DailyLesson'
 import LabList from './components/LabList'
 import LabView from './components/LabView'
+import ContentFeed from './components/ContentFeed'
 import Settings from './components/Settings'
 
-type View = 'lesson' | 'labs' | 'settings'
+type View = 'lesson' | 'labs' | 'feed' | 'settings'
 
 interface TierInfo {
   id: number
@@ -91,6 +92,9 @@ export default function App() {
             labId={activeLabId}
             onBack={() => setActiveLabId(null)}
           />
+        )}
+        {view === 'feed' && (
+          <ContentFeed />
         )}
         {view === 'settings' && (
           <Settings onSaved={handleApiKeySaved} />

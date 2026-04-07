@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { initDatabase } from './database'
 import { registerIpcHandlers } from './ipc-handlers'
+import { startContentScheduler, stopContentScheduler } from './content-pulls/scheduler'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -27,6 +28,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   initDatabase()
   registerIpcHandlers()
+  startContentScheduler()
   createWindow()
 
   app.on('activate', () => {
@@ -37,6 +39,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  stopContentScheduler()
   if (process.platform !== 'darwin') {
     app.quit()
   }
