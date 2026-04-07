@@ -5,6 +5,7 @@ export interface Tier {
   prerequisites: number[]
   estimatedHours: number
   lessons: LessonDefinition[]
+  labs: LabDefinition[]
 }
 
 export interface LessonDefinition {
@@ -47,4 +48,50 @@ export interface TierProgress {
   tierName: string
   totalLessons: number
   completedLessons: number
+}
+
+// Phase 2: Labs
+
+export type LabDifficulty = 'guided' | 'build' | 'freeform'
+
+export interface LabExercise {
+  id: string
+  instructions: string
+  starterCode: string
+  solution: string
+  hints: string[]
+  validationCode: string
+}
+
+export interface LabDefinition {
+  id: string
+  tierId: number
+  title: string
+  description: string
+  difficulty: LabDifficulty
+  relatedLessonIds: string[]
+  estimatedMinutes: number
+  prerequisites: string[]
+  setupInstructions: string
+  exercises: LabExercise[]
+}
+
+export interface LabSubmission {
+  id?: number
+  labId: string
+  exerciseIndex: number
+  code: string
+  passed: boolean
+  output: string
+  errors: string
+  submittedAt: string
+}
+
+export interface LabProgress {
+  labId: string
+  tierId: number
+  status: 'not_started' | 'in_progress' | 'completed'
+  exercisesCompleted: number
+  totalExercises: number
+  completedAt: string | null
 }

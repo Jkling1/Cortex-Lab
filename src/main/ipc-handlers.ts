@@ -5,16 +5,29 @@ import {
   markLessonComplete,
   getTierProgress,
   getLatestGeneratedLesson,
-  saveGeneratedLesson
+  saveGeneratedLesson,
+  getLabProgress,
+  updateLabProgress,
+  saveLabSubmission,
+  getLatestSubmissionForExercise
 } from './database'
 import { generateLesson } from './lesson-generator'
+import { runPythonLab } from './lab-runner'
 import { tiers } from '../../curriculum/tiers'
-import { LessonDefinition } from '../../curriculum/types'
+import { LessonDefinition, LabDefinition } from '../../curriculum/types'
 
 function findLessonDef(lessonDefId: string): LessonDefinition | undefined {
   for (const tier of tiers) {
     const lesson = tier.lessons.find(l => l.id === lessonDefId)
     if (lesson) return lesson
+  }
+  return undefined
+}
+
+function findLabDef(labId: string): LabDefinition | undefined {
+  for (const tier of tiers) {
+    const lab = tier.labs.find(l => l.id === labId)
+    if (lab) return lab
   }
   return undefined
 }
@@ -84,5 +97,122 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('save-api-key', (_event, key: string) => {
     saveApiKey(key)
     return { success: true }
+  })
+
+  // Lab handlers
+
+  ipcMain.handle('get-labs-for-tier', (_event, tierId: number) => {
+    const tier = tiers.find(t => t.id === tierId)
+    if (!tier) return []
+    return tier.labs.map(lab => {
+      const progress = getLabProgress(lab.id)
+      return {
+        id: lab.id,
+        title: lab.title,
+        description: lab.description,
+        difficulty: lab.difficulty,
+        estimatedMinutes: lab.estimatedMinutes,
+        exerciseCount: lab.exercises.length,
+        relatedLessonIds: lab.relatedLessonIds,
+        prerequisites: lab.prerequisites,
+        progress: progress || {
+          labId: lab.id,
+          tierId: lab.tierId,
+          status: 'not_started',
+          exercisesCompleted: 0,
+          totalExercises: lab.exercises.length,
+          completedAt: null
+        }
+      }
+    })
+  })
+
+  ipcMain.handle('get-lab', (_event, labId: string) => {
+    const lab = findLabDef(labId)
+    if (!lab) return null
+
+    const progress = getLabProgress(labId)
+
+    // Get latest submission for each exercise
+    const exerciseStates = lab.exercises.map((ex, idx) => {
+      const submission = getLatestSubmissionForExercise(labId, idx)
+      return {
+        ...ex,
+        lastSubmission: submission
+      }
+    })
+
+    return {
+      ...lab,
+      exercises: exerciseStates,
+      progress: progress || {
+        labId: lab.id,
+        tierId: lab.tierId,
+        status: 'not_started',
+        exercisesCompleted: 0,
+        totalExercises: lab.exercises.length,
+        completedAt: null
+      }
+    }
+  })
+
+  ipcMain.handle('run-lab-exercise', async (_event, labId: string, exerciseIndex: number, code: string) => {
+    const lab = findLabDef(labId)
+    if (!lab) throw new Error(`Lab not found: ${labId}`)
+    if (exerciseIndex < 0 || exerciseIndex >= lab.exercises.length) {
+      throw new Error(`Invalid exercise index: ${exerciseIndex}`)
+    }
+
+    const exercise = lab.exercises[exerciseIndex]
+    const result = await runPythonLab(code, exercise.validationCode)
+
+    // Save submission
+    saveLabSubmission({
+      labId,
+      exerciseIndex,
+      code,
+      passed: result.passed,
+      output: result.output,
+      errors: result.errors,
+      submittedAt: new Date().toISOString()
+    })
+
+    // Update lab progress if passed
+    if (result.passed) {
+      // Count total passed exercises (unique)
+      let passedCount = 0
+      for (let i = 0; i < lab.exercises.length; i++) {
+        if (i === exerciseIndex) {
+          passedCount++
+          continue
+        }
+        const sub = getLatestSubmissionForExercise(labId, i)
+        if (sub?.passed) passedCount++
+      }
+      updateLabProgress(labId, lab.tierId, passedCount, lab.exercises.length)
+    }
+
+    return result
+  })
+
+  ipcMain.handle('get-exercise-hint', (_event, labId: string, exerciseIndex: number, hintIndex: number) => {
+    const lab = findLabDef(labId)
+    if (!lab) throw new Error(`Lab not found: ${labId}`)
+
+    const exercise = lab.exercises[exerciseIndex]
+    if (!exercise) throw new Error(`Exercise not found: ${exerciseIndex}`)
+
+    if (hintIndex >= exercise.hints.length) return null
+    return exercise.hints[hintIndex]
+  })
+
+  ipcMain.handle('get-exercise-solution', (_event, labId: string, exerciseIndex: number) => {
+    const lab = findLabDef(labId)
+    if (!lab) throw new Error(`Lab not found: ${labId}`)
+
+    const exercise = lab.exercises[exerciseIndex]
+    if (!exercise) throw new Error(`Exercise not found: ${exerciseIndex}`)
+
+    return exercise.solution
   })
 }

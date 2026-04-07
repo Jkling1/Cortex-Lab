@@ -1,5 +1,6 @@
 import { Tier } from './types'
 import { tier1Lessons } from './tier1-lessons'
+import { tier1Labs } from './tier1-labs'
 
 export const tiers: Tier[] = [
   {
@@ -8,7 +9,8 @@ export const tiers: Tier[] = [
     description: 'What is AI, ML, deep learning. Core vocabulary. Linear algebra, probability, and calculus refreshers — only what you actually need.',
     prerequisites: [],
     estimatedHours: 15,
-    lessons: tier1Lessons
+    lessons: tier1Lessons,
+    labs: tier1Labs
   },
   {
     id: 2,
@@ -16,7 +18,8 @@ export const tiers: Tier[] = [
     description: 'Regression, classification, decision trees, clustering, evaluation metrics. Build it in Python from scratch, then with scikit-learn.',
     prerequisites: [1],
     estimatedHours: 25,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 3,
@@ -24,7 +27,8 @@ export const tiers: Tier[] = [
     description: 'Perceptrons, backprop, gradient descent. Build a network by hand in NumPy before touching PyTorch.',
     prerequisites: [2],
     estimatedHours: 20,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 4,
@@ -32,7 +36,8 @@ export const tiers: Tier[] = [
     description: 'CNNs, RNNs, transformers. The architecture of modern models.',
     prerequisites: [3],
     estimatedHours: 30,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 5,
@@ -40,7 +45,8 @@ export const tiers: Tier[] = [
     description: 'Tokenization, attention, training, fine-tuning, RLHF. How GPT/Claude actually work under the hood.',
     prerequisites: [4],
     estimatedHours: 25,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 6,
@@ -48,7 +54,8 @@ export const tiers: Tier[] = [
     description: 'Running models on your own hardware. Ollama, llama.cpp, quantization, GGUF, vLLM.',
     prerequisites: [5],
     estimatedHours: 20,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 7,
@@ -56,7 +63,8 @@ export const tiers: Tier[] = [
     description: 'Image classification, object detection, segmentation. Vision models for real-world use.',
     prerequisites: [4],
     estimatedHours: 25,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 8,
@@ -64,7 +72,8 @@ export const tiers: Tier[] = [
     description: 'ROS, sensor fusion, reinforcement learning, SLAM. How to put AI inside a physical machine.',
     prerequisites: [7],
     estimatedHours: 30,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 9,
@@ -72,7 +81,8 @@ export const tiers: Tier[] = [
     description: 'Training pipelines, evaluation, monitoring, versioning, deployment.',
     prerequisites: [6],
     estimatedHours: 20,
-    lessons: []
+    lessons: [],
+    labs: []
   },
   {
     id: 10,
@@ -80,6 +90,7 @@ export const tiers: Tier[] = [
     description: 'Reading papers, replicating results, contributing original work.',
     prerequisites: [5, 9],
     estimatedHours: 40,
-    lessons: []
+    lessons: [],
+    labs: []
   }
 ]

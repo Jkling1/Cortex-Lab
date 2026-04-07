@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import DailyLesson from './components/DailyLesson'
+import LabList from './components/LabList'
+import LabView from './components/LabView'
 import Settings from './components/Settings'
 
-type View = 'lesson' | 'settings'
+type View = 'lesson' | 'labs' | 'settings'
 
 interface TierInfo {
   id: number
@@ -16,6 +18,7 @@ interface TierInfo {
 
 export default function App() {
   const [view, setView] = useState<View>('lesson')
+  const [activeLabId, setActiveLabId] = useState<string | null>(null)
   const [curriculum, setCurriculum] = useState<TierInfo[]>([])
   const [userState, setUserState] = useState<{
     currentTierId: number
@@ -76,6 +79,18 @@ export default function App() {
       <main className="main-content">
         {view === 'lesson' && (
           <DailyLesson onComplete={handleLessonComplete} />
+        )}
+        {view === 'labs' && !activeLabId && (
+          <LabList
+            tierId={userState.currentTierId}
+            onSelectLab={(id) => setActiveLabId(id)}
+          />
+        )}
+        {view === 'labs' && activeLabId && (
+          <LabView
+            labId={activeLabId}
+            onBack={() => setActiveLabId(null)}
+          />
         )}
         {view === 'settings' && (
           <Settings onSaved={handleApiKeySaved} />

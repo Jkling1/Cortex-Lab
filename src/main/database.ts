@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
-import { UserState, LessonProgress, GeneratedLesson, TierProgress } from '../../curriculum/types'
+import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission } from '../../curriculum/types'
 import { tiers } from '../../curriculum/tiers'
 
 let db: Database.Database
@@ -42,6 +42,27 @@ function migrate(): void {
       key_takeaways TEXT,
       review_questions TEXT,
       generated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS lab_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lab_id TEXT NOT NULL UNIQUE,
+      tier_id INTEGER NOT NULL,
+      status TEXT DEFAULT 'not_started',
+      exercises_completed INTEGER DEFAULT 0,
+      total_exercises INTEGER NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS lab_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lab_id TEXT NOT NULL,
+      exercise_index INTEGER NOT NULL,
+      code TEXT NOT NULL,
+      passed INTEGER DEFAULT 0,
+      output TEXT,
+      errors TEXT,
+      submitted_at TEXT DEFAULT (datetime('now'))
     );
 
     INSERT OR IGNORE INTO user_state (id) VALUES (1);
@@ -158,5 +179,87 @@ export function getTierProgress(tierId: number): TierProgress {
     tierName: tier.name,
     totalLessons: tier.lessons.length,
     completedLessons: count.count
+  }
+}
+
+// Lab functions
+
+export function getLabProgress(labId: string): LabProgress | null {
+  const row = db.prepare('SELECT * FROM lab_progress WHERE lab_id = ?').get(labId) as Record<string, unknown> | undefined
+  if (!row) return null
+  return {
+    labId: row.lab_id as string,
+    tierId: row.tier_id as number,
+    status: row.status as LabProgress['status'],
+    exercisesCompleted: row.exercises_completed as number,
+    totalExercises: row.total_exercises as number,
+    completedAt: row.completed_at as string | null
+  }
+}
+
+export function updateLabProgress(labId: string, tierId: number, exercisesCompleted: number, totalExercises: number): LabProgress {
+  const isComplete = exercisesCompleted >= totalExercises
+  const status = isComplete ? 'completed' : exercisesCompleted > 0 ? 'in_progress' : 'not_started'
+  const now = isComplete ? new Date().toISOString() : null
+
+  db.prepare(`
+    INSERT INTO lab_progress (lab_id, tier_id, status, exercises_completed, total_exercises, completed_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(lab_id) DO UPDATE SET
+      status = ?, exercises_completed = ?, completed_at = COALESCE(completed_at, ?)
+  `).run(labId, tierId, status, exercisesCompleted, totalExercises, now, status, exercisesCompleted, now)
+
+  if (isComplete) updateStreak()
+
+  return { labId, tierId, status, exercisesCompleted, totalExercises, completedAt: now }
+}
+
+export function saveLabSubmission(submission: LabSubmission): number {
+  const result = db.prepare(`
+    INSERT INTO lab_submissions (lab_id, exercise_index, code, passed, output, errors)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    submission.labId,
+    submission.exerciseIndex,
+    submission.code,
+    submission.passed ? 1 : 0,
+    submission.output,
+    submission.errors
+  )
+  return result.lastInsertRowid as number
+}
+
+export function getLabSubmissions(labId: string): LabSubmission[] {
+  const rows = db.prepare(
+    'SELECT * FROM lab_submissions WHERE lab_id = ? ORDER BY submitted_at DESC'
+  ).all(labId) as Record<string, unknown>[]
+
+  return rows.map(row => ({
+    id: row.id as number,
+    labId: row.lab_id as string,
+    exerciseIndex: row.exercise_index as number,
+    code: row.code as string,
+    passed: (row.passed as number) === 1,
+    output: row.output as string,
+    errors: row.errors as string,
+    submittedAt: row.submitted_at as string
+  }))
+}
+
+export function getLatestSubmissionForExercise(labId: string, exerciseIndex: number): LabSubmission | null {
+  const row = db.prepare(
+    'SELECT * FROM lab_submissions WHERE lab_id = ? AND exercise_index = ? ORDER BY submitted_at DESC LIMIT 1'
+  ).get(labId, exerciseIndex) as Record<string, unknown> | undefined
+
+  if (!row) return null
+  return {
+    id: row.id as number,
+    labId: row.lab_id as string,
+    exerciseIndex: row.exercise_index as number,
+    code: row.code as string,
+    passed: (row.passed as number) === 1,
+    output: row.output as string,
+    errors: row.errors as string,
+    submittedAt: row.submitted_at as string
   }
 }
