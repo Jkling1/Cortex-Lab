@@ -20,7 +20,13 @@ import {
   activateTrack,
   deactivateTrack,
   completeMilestone,
-  getAllTrackProgress
+  getAllTrackProgress,
+  addReviewCards,
+  getDueReviewCards,
+  reviewCard,
+  getDashboardStats,
+  getSkillTree,
+  hasReviewCardsForLesson
 } from './database'
 import { generateLesson } from './lesson-generator'
 import { runPythonLab } from './lab-runner'
@@ -100,6 +106,20 @@ export function registerIpcHandlers(): void {
     }
 
     markLessonComplete(lessonDefId, lessonDef.tierId)
+
+    // Auto-generate spaced repetition cards for completed lesson
+    if (!hasReviewCardsForLesson(lessonDefId)) {
+      const cards: { concept: string; question: string; answer: string }[] = []
+      for (const concept of lessonDef.concepts) {
+        cards.push({
+          concept,
+          question: `Explain "${concept}" and why it matters in ML.`,
+          answer: `From "${lessonDef.title}": ${concept}`
+        })
+      }
+      if (cards.length > 0) addReviewCards(lessonDefId, cards)
+    }
+
     return getUserState()
   })
 
@@ -347,5 +367,53 @@ export function registerIpcHandlers(): void {
     const track = projectTracks.find(t => t.id === trackId)
     if (!track) throw new Error(`Track not found: ${trackId}`)
     return completeMilestone(trackId, milestoneId, track.milestones.length)
+  })
+
+  // Dashboard & review handlers
+
+  ipcMain.handle('get-dashboard-stats', () => {
+    return getDashboardStats()
+  })
+
+  ipcMain.handle('get-skill-tree', () => {
+    return getSkillTree()
+  })
+
+  ipcMain.handle('get-due-review-cards', (_event, limit: number) => {
+    return getDueReviewCards(limit || 10)
+  })
+
+  ipcMain.handle('submit-review', (_event, cardId: number, quality: number) => {
+    reviewCard(cardId, quality)
+    return { success: true }
+  })
+
+  ipcMain.handle('generate-review-cards', (_event, lessonDefId: string) => {
+    if (hasReviewCardsForLesson(lessonDefId)) return { generated: 0 }
+
+    const lessonDef = findLessonDef(lessonDefId)
+    if (!lessonDef) return { generated: 0 }
+
+    // Auto-generate review cards from lesson concepts and objectives
+    const cards: { concept: string; question: string; answer: string }[] = []
+
+    for (const concept of lessonDef.concepts) {
+      cards.push({
+        concept,
+        question: `Explain the concept of "${concept}" in your own words.`,
+        answer: `This relates to the lesson "${lessonDef.title}". Key concept: ${concept}.`
+      })
+    }
+
+    for (let i = 0; i < Math.min(lessonDef.objectives.length, 3); i++) {
+      cards.push({
+        concept: lessonDef.concepts[0] || lessonDef.title,
+        question: lessonDef.objectives[i],
+        answer: `Objective from "${lessonDef.title}": ${lessonDef.objectives[i]}`
+      })
+    }
+
+    addReviewCards(lessonDefId, cards)
+    return { generated: cards.length }
   })
 }

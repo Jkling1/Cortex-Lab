@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
+import Dashboard from './components/Dashboard'
 import DailyLesson from './components/DailyLesson'
 import LabList from './components/LabList'
 import LabView from './components/LabView'
 import ContentFeed from './components/ContentFeed'
 import ProjectTrackList from './components/ProjectTrackList'
 import ProjectTrackDetail from './components/ProjectTrackDetail'
+import MasteryReview from './components/MasteryReview'
 import Settings from './components/Settings'
 
-type View = 'lesson' | 'labs' | 'feed' | 'projects' | 'settings'
+type View = 'dashboard' | 'lesson' | 'labs' | 'feed' | 'projects' | 'review' | 'settings'
 
 interface TierInfo {
   id: number
@@ -20,7 +22,7 @@ interface TierInfo {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>('lesson')
+  const [view, setView] = useState<View>('dashboard')
   const [activeLabId, setActiveLabId] = useState<string | null>(null)
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null)
   const [curriculum, setCurriculum] = useState<TierInfo[]>([])
@@ -81,6 +83,9 @@ export default function App() {
         activeView={view}
       />
       <main className="main-content">
+        {view === 'dashboard' && (
+          <Dashboard onNavigateReview={() => setView('review')} />
+        )}
         {view === 'lesson' && (
           <DailyLesson onComplete={handleLessonComplete} />
         )}
@@ -107,6 +112,9 @@ export default function App() {
             trackId={activeTrackId}
             onBack={() => setActiveTrackId(null)}
           />
+        )}
+        {view === 'review' && (
+          <MasteryReview />
         )}
         {view === 'settings' && (
           <Settings onSaved={handleApiKeySaved} />

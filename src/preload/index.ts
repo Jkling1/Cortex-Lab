@@ -36,7 +36,13 @@ const api = {
   activateProjectTrack: (trackId: string) => ipcRenderer.invoke('activate-project-track', trackId),
   deactivateProjectTrack: (trackId: string) => ipcRenderer.invoke('deactivate-project-track', trackId),
   completeMilestone: (trackId: string, milestoneId: string) =>
-    ipcRenderer.invoke('complete-milestone', trackId, milestoneId)
+    ipcRenderer.invoke('complete-milestone', trackId, milestoneId),
+  // Dashboard & review APIs
+  getDashboardStats: () => ipcRenderer.invoke('get-dashboard-stats'),
+  getSkillTree: () => ipcRenderer.invoke('get-skill-tree'),
+  getDueReviewCards: (limit?: number) => ipcRenderer.invoke('get-due-review-cards', limit || 10),
+  submitReview: (cardId: number, quality: number) => ipcRenderer.invoke('submit-review', cardId, quality),
+  generateReviewCards: (lessonDefId: string) => ipcRenderer.invoke('generate-review-cards', lessonDefId)
 }
 
 contextBridge.exposeInMainWorld('api', api)

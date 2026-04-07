@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
-import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig, ProjectTrackProgress } from '../../curriculum/types'
+import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig, ProjectTrackProgress, ReviewCard, DashboardStats, SkillTreeNode } from '../../curriculum/types'
 import { tiers } from '../../curriculum/tiers'
 
 let db: Database.Database
@@ -93,6 +93,19 @@ function migrate(): void {
     INSERT OR IGNORE INTO content_sources (source, topics) VALUES
       ('arxiv', '["machine learning", "deep learning", "neural networks", "computer vision", "natural language processing", "reinforcement learning"]'),
       ('huggingface', '["text-generation", "image-classification", "object-detection", "transformers"]');
+
+    CREATE TABLE IF NOT EXISTS review_cards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lesson_def_id TEXT NOT NULL,
+      concept TEXT NOT NULL,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      next_review_at TEXT NOT NULL,
+      interval_days INTEGER DEFAULT 1,
+      ease_factor REAL DEFAULT 2.5,
+      review_count INTEGER DEFAULT 0,
+      last_reviewed_at TEXT
+    );
 
     CREATE TABLE IF NOT EXISTS project_track_progress (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -562,4 +575,166 @@ export function getAllTrackProgress(): ProjectTrackProgress[] {
       completedAt: row.completed_at as string | null
     }
   })
+}
+
+// Spaced repetition functions
+
+export function addReviewCards(lessonDefId: string, cards: { concept: string; question: string; answer: string }[]): void {
+  const now = new Date().toISOString()
+  const stmt = db.prepare(`
+    INSERT INTO review_cards (lesson_def_id, concept, question, answer, next_review_at)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  for (const card of cards) {
+    stmt.run(lessonDefId, card.concept, card.question, card.answer, now)
+  }
+}
+
+export function getDueReviewCards(limit: number = 10): ReviewCard[] {
+  const now = new Date().toISOString()
+  const rows = db.prepare(
+    'SELECT * FROM review_cards WHERE next_review_at <= ? ORDER BY next_review_at ASC LIMIT ?'
+  ).all(now, limit) as Record<string, unknown>[]
+
+  return rows.map(rowToReviewCard)
+}
+
+export function reviewCard(cardId: number, quality: number): void {
+  const row = db.prepare('SELECT * FROM review_cards WHERE id = ?').get(cardId) as Record<string, unknown> | undefined
+  if (!row) return
+
+  let ef = row.ease_factor as number
+  const count = (row.review_count as number) + 1
+  let interval = row.interval_days as number
+
+  // SM-2 algorithm
+  ef = Math.max(1.3, ef + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+
+  if (quality < 3) {
+    interval = 1
+  } else if (count === 1) {
+    interval = 1
+  } else if (count === 2) {
+    interval = 6
+  } else {
+    interval = Math.round(interval * ef)
+  }
+
+  const nextReview = new Date(Date.now() + interval * 86400000).toISOString()
+  const now = new Date().toISOString()
+
+  db.prepare(`
+    UPDATE review_cards SET
+      ease_factor = ?, interval_days = ?, review_count = ?,
+      next_review_at = ?, last_reviewed_at = ?
+    WHERE id = ?
+  `).run(ef, interval, count, nextReview, now, cardId)
+}
+
+export function getReviewStats(): { due: number; mastered: number; inReview: number } {
+  const now = new Date().toISOString()
+  const due = db.prepare('SELECT COUNT(*) as c FROM review_cards WHERE next_review_at <= ?').get(now) as { c: number }
+  const mastered = db.prepare('SELECT COUNT(*) as c FROM review_cards WHERE interval_days >= 21').get() as { c: number }
+  const total = db.prepare('SELECT COUNT(*) as c FROM review_cards').get() as { c: number }
+
+  return {
+    due: due.c,
+    mastered: mastered.c,
+    inReview: total.c - mastered.c
+  }
+}
+
+function rowToReviewCard(row: Record<string, unknown>): ReviewCard {
+  return {
+    id: row.id as number,
+    lessonDefId: row.lesson_def_id as string,
+    concept: row.concept as string,
+    question: row.question as string,
+    answer: row.answer as string,
+    nextReviewAt: row.next_review_at as string,
+    interval: row.interval_days as number,
+    easeFactor: row.ease_factor as number,
+    reviewCount: row.review_count as number,
+    lastReviewedAt: row.last_reviewed_at as string | null
+  }
+}
+
+// Dashboard functions
+
+export function getDashboardStats(): DashboardStats {
+  const state = getUserState()
+  const tier = tiers.find(t => t.id === state.currentTierId)
+
+  const totalLessons = db.prepare("SELECT COUNT(*) as c FROM lesson_progress WHERE status = 'completed'").get() as { c: number }
+  const totalLabs = db.prepare("SELECT COUNT(*) as c FROM lab_progress WHERE status = 'completed'").get() as { c: number }
+  const activeTracks = db.prepare('SELECT COUNT(*) as c FROM project_track_progress WHERE active = 1').get() as { c: number }
+  const reviewStats = getReviewStats()
+
+  let totalHours = 0
+  for (const t of tiers) {
+    const completed = db.prepare(
+      "SELECT COUNT(*) as c FROM lesson_progress WHERE tier_id = ? AND status = 'completed'"
+    ).get(t.id) as { c: number }
+    if (completed.c > 0) {
+      totalHours += (completed.c / Math.max(1, t.lessons.length)) * t.estimatedHours
+    }
+  }
+
+  return {
+    currentTierId: state.currentTierId,
+    currentTierName: tier?.name || 'Unknown',
+    currentLessonOrder: state.currentLessonOrder,
+    totalLessonsInTier: tier?.lessons.length || 0,
+    streakDays: state.streakDays,
+    totalLessonsCompleted: totalLessons.c,
+    totalLabsCompleted: totalLabs.c,
+    totalHoursEstimated: Math.round(totalHours),
+    activeProjectTracks: activeTracks.c,
+    reviewCardsDue: reviewStats.due,
+    conceptsMastered: reviewStats.mastered,
+    conceptsInReview: reviewStats.inReview
+  }
+}
+
+export function getSkillTree(): SkillTreeNode[] {
+  const state = getUserState()
+
+  return tiers.map(tier => {
+    const lessonsCompleted = db.prepare(
+      "SELECT COUNT(*) as c FROM lesson_progress WHERE tier_id = ? AND status = 'completed'"
+    ).get(tier.id) as { c: number }
+
+    const labsCompleted = db.prepare(
+      "SELECT COUNT(*) as c FROM lab_progress WHERE tier_id = ? AND status = 'completed'"
+    ).get(tier.id) as { c: number }
+
+    let status: SkillTreeNode['status']
+    if (lessonsCompleted.c === tier.lessons.length && tier.lessons.length > 0) {
+      status = 'completed'
+    } else if (tier.id === state.currentTierId) {
+      status = 'in_progress'
+    } else if (tier.id < state.currentTierId) {
+      status = 'completed'
+    } else {
+      const prereqsMet = tier.prerequisites.every(pid => pid < state.currentTierId || pid === state.currentTierId)
+      status = prereqsMet && tier.lessons.length > 0 ? 'available' : 'locked'
+    }
+
+    return {
+      id: tier.id,
+      name: tier.name,
+      description: tier.description,
+      lessonsTotal: tier.lessons.length,
+      lessonsCompleted: lessonsCompleted.c,
+      labsTotal: tier.labs.length,
+      labsCompleted: labsCompleted.c,
+      prerequisites: tier.prerequisites,
+      status
+    }
+  })
+}
+
+export function hasReviewCardsForLesson(lessonDefId: string): boolean {
+  const row = db.prepare('SELECT COUNT(*) as c FROM review_cards WHERE lesson_def_id = ?').get(lessonDefId) as { c: number }
+  return row.c > 0
 }

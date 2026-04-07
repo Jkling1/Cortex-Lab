@@ -172,3 +172,50 @@ export interface ProjectTrackProgress {
   startedAt: string | null
   completedAt: string | null
 }
+
+// Phase 5: Dashboard & Spaced Repetition
+
+export interface ReviewCard {
+  id?: number
+  lessonDefId: string
+  concept: string
+  question: string
+  answer: string
+  nextReviewAt: string
+  interval: number
+  easeFactor: number
+  reviewCount: number
+  lastReviewedAt: string | null
+}
+
+export interface ReviewResult {
+  cardId: number
+  quality: number  // 0-5 (SM-2 scale)
+}
+
+export interface DashboardStats {
+  currentTierId: number
+  currentTierName: string
+  currentLessonOrder: number
+  totalLessonsInTier: number
+  streakDays: number
+  totalLessonsCompleted: number
+  totalLabsCompleted: number
+  totalHoursEstimated: number
+  activeProjectTracks: number
+  reviewCardsDue: number
+  conceptsMastered: number
+  conceptsInReview: number
+}
+
+export interface SkillTreeNode {
+  id: number
+  name: string
+  description: string
+  lessonsTotal: number
+  lessonsCompleted: number
+  labsTotal: number
+  labsCompleted: number
+  prerequisites: number[]
+  status: 'locked' | 'available' | 'in_progress' | 'completed'
+}
