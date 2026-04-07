@@ -29,7 +29,14 @@ const api = {
   onContentUpdated: (callback: (result: unknown) => void) => {
     ipcRenderer.on('content-updated', (_event, result) => callback(result))
     return () => { ipcRenderer.removeAllListeners('content-updated') }
-  }
+  },
+  // Project track APIs
+  getProjectTracks: () => ipcRenderer.invoke('get-project-tracks'),
+  getProjectTrack: (trackId: string) => ipcRenderer.invoke('get-project-track', trackId),
+  activateProjectTrack: (trackId: string) => ipcRenderer.invoke('activate-project-track', trackId),
+  deactivateProjectTrack: (trackId: string) => ipcRenderer.invoke('deactivate-project-track', trackId),
+  completeMilestone: (trackId: string, milestoneId: string) =>
+    ipcRenderer.invoke('complete-milestone', trackId, milestoneId)
 }
 
 contextBridge.exposeInMainWorld('api', api)

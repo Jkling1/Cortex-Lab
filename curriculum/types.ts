@@ -137,3 +137,38 @@ export interface ContentStats {
   bookmarkedCount: number
   lastFetchedAt: string | null
 }
+
+// Phase 4: Project Tracks
+
+export interface ProjectMilestone {
+  id: string
+  title: string
+  description: string
+  order: number
+  relatedLessonIds: string[]
+  relatedLabIds: string[]
+  relatedTierIds: number[]
+  deliverable: string
+  checkpoints: string[]
+}
+
+export interface ProjectTrack {
+  id: string
+  name: string
+  tagline: string
+  description: string
+  icon: string
+  color: string
+  milestones: ProjectMilestone[]
+}
+
+export interface ProjectTrackProgress {
+  trackId: string
+  activeTrack: boolean
+  currentMilestoneOrder: number
+  milestonesCompleted: number
+  totalMilestones: number
+  completedMilestoneIds: string[]
+  startedAt: string | null
+  completedAt: string | null
+}

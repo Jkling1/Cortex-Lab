@@ -15,12 +15,18 @@ import {
   dismissArticle,
   getContentStats,
   getContentSources,
-  updateContentSource
+  updateContentSource,
+  getTrackProgress,
+  activateTrack,
+  deactivateTrack,
+  completeMilestone,
+  getAllTrackProgress
 } from './database'
 import { generateLesson } from './lesson-generator'
 import { runPythonLab } from './lab-runner'
 import { runContentPull } from './content-pulls/scheduler'
 import { tiers } from '../../curriculum/tiers'
+import { projectTracks } from '../../curriculum/project-tracks'
 import { LessonDefinition, LabDefinition, ContentFeedFilters } from '../../curriculum/types'
 
 function findLessonDef(lessonDefId: string): LessonDefinition | undefined {
@@ -253,5 +259,93 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('refresh-content', async () => {
     return await runContentPull()
+  })
+
+  // Project track handlers
+
+  ipcMain.handle('get-project-tracks', () => {
+    const allProgress = getAllTrackProgress()
+    return projectTracks.map(track => {
+      const progress = allProgress.find(p => p.trackId === track.id)
+      return {
+        id: track.id,
+        name: track.name,
+        tagline: track.tagline,
+        description: track.description,
+        icon: track.icon,
+        color: track.color,
+        milestoneCount: track.milestones.length,
+        progress: progress ? {
+          ...progress,
+          totalMilestones: track.milestones.length
+        } : null
+      }
+    })
+  })
+
+  ipcMain.handle('get-project-track', (_event, trackId: string) => {
+    const track = projectTracks.find(t => t.id === trackId)
+    if (!track) return null
+
+    const progress = getTrackProgress(trackId)
+    const completedIds = progress?.completedMilestoneIds || []
+
+    // For each milestone, look up related lesson/lab titles
+    const milestones = track.milestones.map(m => {
+      const relatedLessons = m.relatedLessonIds.map(lid => {
+        for (const tier of tiers) {
+          const lesson = tier.lessons.find(l => l.id === lid)
+          if (lesson) return { id: lid, title: lesson.title, tierId: tier.id }
+        }
+        return { id: lid, title: lid, tierId: 0 }
+      })
+
+      const relatedLabs = m.relatedLabIds.map(lid => {
+        for (const tier of tiers) {
+          const lab = tier.labs.find(l => l.id === lid)
+          if (lab) return { id: lid, title: lab.title, tierId: tier.id }
+        }
+        return { id: lid, title: lid, tierId: 0 }
+      })
+
+      const relatedTiers = m.relatedTierIds.map(tid => {
+        const tier = tiers.find(t => t.id === tid)
+        return { id: tid, name: tier?.name || `Tier ${tid}` }
+      })
+
+      return {
+        ...m,
+        completed: completedIds.includes(m.id),
+        relatedLessons,
+        relatedLabs,
+        relatedTiers
+      }
+    })
+
+    return {
+      ...track,
+      milestones,
+      progress: progress ? {
+        ...progress,
+        totalMilestones: track.milestones.length
+      } : null
+    }
+  })
+
+  ipcMain.handle('activate-project-track', (_event, trackId: string) => {
+    const track = projectTracks.find(t => t.id === trackId)
+    if (!track) throw new Error(`Track not found: ${trackId}`)
+    return activateTrack(trackId, track.milestones.length)
+  })
+
+  ipcMain.handle('deactivate-project-track', (_event, trackId: string) => {
+    deactivateTrack(trackId)
+    return { success: true }
+  })
+
+  ipcMain.handle('complete-milestone', (_event, trackId: string, milestoneId: string) => {
+    const track = projectTracks.find(t => t.id === trackId)
+    if (!track) throw new Error(`Track not found: ${trackId}`)
+    return completeMilestone(trackId, milestoneId, track.milestones.length)
   })
 }

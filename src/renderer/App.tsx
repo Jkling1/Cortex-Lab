@@ -4,9 +4,11 @@ import DailyLesson from './components/DailyLesson'
 import LabList from './components/LabList'
 import LabView from './components/LabView'
 import ContentFeed from './components/ContentFeed'
+import ProjectTrackList from './components/ProjectTrackList'
+import ProjectTrackDetail from './components/ProjectTrackDetail'
 import Settings from './components/Settings'
 
-type View = 'lesson' | 'labs' | 'feed' | 'settings'
+type View = 'lesson' | 'labs' | 'feed' | 'projects' | 'settings'
 
 interface TierInfo {
   id: number
@@ -20,6 +22,7 @@ interface TierInfo {
 export default function App() {
   const [view, setView] = useState<View>('lesson')
   const [activeLabId, setActiveLabId] = useState<string | null>(null)
+  const [activeTrackId, setActiveTrackId] = useState<string | null>(null)
   const [curriculum, setCurriculum] = useState<TierInfo[]>([])
   const [userState, setUserState] = useState<{
     currentTierId: number
@@ -95,6 +98,15 @@ export default function App() {
         )}
         {view === 'feed' && (
           <ContentFeed />
+        )}
+        {view === 'projects' && !activeTrackId && (
+          <ProjectTrackList onSelectTrack={(id) => setActiveTrackId(id)} />
+        )}
+        {view === 'projects' && activeTrackId && (
+          <ProjectTrackDetail
+            trackId={activeTrackId}
+            onBack={() => setActiveTrackId(null)}
+          />
         )}
         {view === 'settings' && (
           <Settings onSaved={handleApiKeySaved} />

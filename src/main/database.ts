@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { app } from 'electron'
-import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig } from '../../curriculum/types'
+import { UserState, LessonProgress, GeneratedLesson, TierProgress, LabProgress, LabSubmission, ContentArticle, ContentFeedFilters, ContentStats, ContentSourceConfig, ProjectTrackProgress } from '../../curriculum/types'
 import { tiers } from '../../curriculum/tiers'
 
 let db: Database.Database
@@ -93,6 +93,16 @@ function migrate(): void {
     INSERT OR IGNORE INTO content_sources (source, topics) VALUES
       ('arxiv', '["machine learning", "deep learning", "neural networks", "computer vision", "natural language processing", "reinforcement learning"]'),
       ('huggingface', '["text-generation", "image-classification", "object-detection", "transformers"]');
+
+    CREATE TABLE IF NOT EXISTS project_track_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      track_id TEXT NOT NULL UNIQUE,
+      active INTEGER DEFAULT 0,
+      current_milestone_order INTEGER DEFAULT 1,
+      completed_milestone_ids TEXT DEFAULT '[]',
+      started_at TEXT,
+      completed_at TEXT
+    );
 
     INSERT OR IGNORE INTO user_state (id) VALUES (1);
   `)
@@ -456,4 +466,100 @@ export function searchContentForLesson(concepts: string[], limit: number = 5): C
   } catch {
     return []
   }
+}
+
+// Project track functions
+
+export function getTrackProgress(trackId: string): ProjectTrackProgress | null {
+  const row = db.prepare('SELECT * FROM project_track_progress WHERE track_id = ?').get(trackId) as Record<string, unknown> | undefined
+  if (!row) return null
+
+  const completedIds = JSON.parse((row.completed_milestone_ids as string) || '[]') as string[]
+  return {
+    trackId: row.track_id as string,
+    activeTrack: (row.active as number) === 1,
+    currentMilestoneOrder: row.current_milestone_order as number,
+    milestonesCompleted: completedIds.length,
+    totalMilestones: 0,
+    completedMilestoneIds: completedIds,
+    startedAt: row.started_at as string | null,
+    completedAt: row.completed_at as string | null
+  }
+}
+
+export function activateTrack(trackId: string, totalMilestones: number): ProjectTrackProgress {
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO project_track_progress (track_id, active, current_milestone_order, started_at)
+    VALUES (?, 1, 1, ?)
+    ON CONFLICT(track_id) DO UPDATE SET active = 1, started_at = COALESCE(started_at, ?)
+  `).run(trackId, now, now)
+
+  return {
+    trackId,
+    activeTrack: true,
+    currentMilestoneOrder: 1,
+    milestonesCompleted: 0,
+    totalMilestones,
+    completedMilestoneIds: [],
+    startedAt: now,
+    completedAt: null
+  }
+}
+
+export function deactivateTrack(trackId: string): void {
+  db.prepare('UPDATE project_track_progress SET active = 0 WHERE track_id = ?').run(trackId)
+}
+
+export function completeMilestone(trackId: string, milestoneId: string, totalMilestones: number): ProjectTrackProgress {
+  const existing = getTrackProgress(trackId)
+  const completedIds = existing?.completedMilestoneIds || []
+
+  if (!completedIds.includes(milestoneId)) {
+    completedIds.push(milestoneId)
+  }
+
+  const isTrackComplete = completedIds.length >= totalMilestones
+  const nextOrder = (existing?.currentMilestoneOrder || 1) + 1
+
+  db.prepare(`
+    INSERT INTO project_track_progress (track_id, active, current_milestone_order, completed_milestone_ids, completed_at)
+    VALUES (?, 1, ?, ?, ?)
+    ON CONFLICT(track_id) DO UPDATE SET
+      current_milestone_order = ?, completed_milestone_ids = ?,
+      completed_at = CASE WHEN ? THEN datetime('now') ELSE completed_at END
+  `).run(
+    trackId, nextOrder, JSON.stringify(completedIds), isTrackComplete ? new Date().toISOString() : null,
+    nextOrder, JSON.stringify(completedIds), isTrackComplete ? 1 : 0
+  )
+
+  if (isTrackComplete) updateStreak()
+
+  return {
+    trackId,
+    activeTrack: true,
+    currentMilestoneOrder: isTrackComplete ? totalMilestones : nextOrder,
+    milestonesCompleted: completedIds.length,
+    totalMilestones,
+    completedMilestoneIds: completedIds,
+    startedAt: existing?.startedAt || null,
+    completedAt: isTrackComplete ? new Date().toISOString() : null
+  }
+}
+
+export function getAllTrackProgress(): ProjectTrackProgress[] {
+  const rows = db.prepare('SELECT * FROM project_track_progress').all() as Record<string, unknown>[]
+  return rows.map(row => {
+    const completedIds = JSON.parse((row.completed_milestone_ids as string) || '[]') as string[]
+    return {
+      trackId: row.track_id as string,
+      activeTrack: (row.active as number) === 1,
+      currentMilestoneOrder: row.current_milestone_order as number,
+      milestonesCompleted: completedIds.length,
+      totalMilestones: 0,
+      completedMilestoneIds: completedIds,
+      startedAt: row.started_at as string | null,
+      completedAt: row.completed_at as string | null
+    }
+  })
 }
